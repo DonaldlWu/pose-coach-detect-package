@@ -1,10 +1,11 @@
 import cv2
 import numpy as np
 from tqdm import tqdm
+from ultralytics import YOLO
 import os
 import sys
 
-INPUT_DIR  = "input"
+INPUT_DIR = "input"
 OUTPUT_DIR = "output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -20,34 +21,17 @@ if not os.path.exists(fname):
     sys.exit(1)
 
 stem = os.path.splitext(input_name)[0]
-ext  = os.path.splitext(input_name)[1]
+ext = os.path.splitext(input_name)[1]
 output_fname = os.path.join(OUTPUT_DIR, f"{stem}_output{ext}")
 
-# set param
-filter_kwargs = {
-    # remove noise (smoothing filter, size has to be 2n-1)
-    "gaussian_kernel_size": 19,
-    # remove noise and enhance information (morphology operation: erosion and dilation)
-    "morphology_kernel_size": 3,
-    "background_threshold": 40,  # difference threshold of background /not background
-}
+CONF_THRESHOLD = 0.25   # minimum YOLO confidence to accept detection
+MAX_TRAIL_JUMP = 300    # reset trail if detection jumps further than this (px)
 
-hsv_kwargs = {
-    "white_lower": [0, 0, 160],    # HSV lower bound for white (any hue, low sat, high val)
-    "white_upper": [180, 50, 255], # HSV upper bound for white
-    "min_radius": 5,               # smallest expected ball radius (px)
-    "max_radius": 25,              # largest expected ball radius (px)
-    "min_circularity": 0.4,        # 0.0~1.0, 1.0 = perfect circle
-    "person_area_min": 5000,       # blobs larger than this (px²) are treated as person
-}
-
-# if a new detection jumps further than this, reset the trail
-MAX_TRAIL_JUMP = 300
-# require this many consecutive detections before recording trail
-MIN_CONSECUTIVE = 3
-
+SPORTS_BALL_CLASS = 32     # COCO class id for sports ball
 
 # =========================================================================
+
+model = YOLO("yolov8n.pt")
 
 
 def track_baseball(video_path):
@@ -61,16 +45,10 @@ def track_baseball(video_path):
     print(
         f'Video resolution: {width} x {height}, frame rate: {fps} fps, frame count: {frame_count}.')
 
-    # initialize background subtractor ---------------------------------
-    backSub = cv2.createBackgroundSubtractorMOG2(
-        varThreshold=filter_kwargs['background_threshold'],
-        detectShadows=False)
-
     # obtain video frames ----------------------------------------------
     trail = []
     frames = []
     result_frames = []
-    consecutive_detections = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -79,76 +57,38 @@ def track_baseball(video_path):
     cap.release()
 
     # detect ball from frames ----------------------------------------
-    warmup_frames = 6  # skip first 0.2s for background determination
-    for frame_id, frame in enumerate(tqdm(frames)):
-
-        # apply background subtraction as mask
-        fg_mask = backSub.apply(cv2.GaussianBlur(
-            frame, (filter_kwargs["gaussian_kernel_size"],)*2, 0))
+    for frame in tqdm(frames):
         result_frame = frame.copy()
 
-        # apply morphology
-        kernel = np.ones(
-            (filter_kwargs["morphology_kernel_size"],)*2, np.uint8)
-        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+        # run YOLO inference (sports ball class only)
+        results = model(
+            frame, classes=[SPORTS_BALL_CLASS], conf=CONF_THRESHOLD, verbose=False)
 
-        # skip warmup frames
-        if frame_id < warmup_frames:
-            continue
+        # pick highest-confidence detection
+        best_box = None
+        best_conf = 0.0
+        for box in results[0].boxes:
+            conf = float(box.conf)
+            if conf > best_conf:
+                best_conf = conf
+                best_box = box
 
-        # person exclusion: large blobs in fg_mask → exclusion zone
-        person_excl = np.zeros_like(fg_mask)
-        all_cnts, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for cnt in all_cnts:
-            if cv2.contourArea(cnt) > hsv_kwargs["person_area_min"]:
-                cv2.drawContours(person_excl, [cnt], -1, 255, -1)
-        person_excl = cv2.dilate(person_excl, np.ones((15, 15), np.uint8))
-        fg_clean = cv2.bitwise_and(fg_mask, cv2.bitwise_not(person_excl))
-
-        # HSV white color filter
-        hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        white_mask = cv2.inRange(
-            hsv_frame,
-            np.array(hsv_kwargs["white_lower"]),
-            np.array(hsv_kwargs["white_upper"]))
-
-        # intersect cleaned fg mask with white color mask
-        ball_mask = cv2.bitwise_and(fg_clean, white_mask)
-
-        # find ball candidate: filter by size and circularity
-        area_min = np.pi * hsv_kwargs["min_radius"] ** 2 * 0.5
-        area_max = np.pi * hsv_kwargs["max_radius"] ** 2 * 3.0
-        contours, _ = cv2.findContours(ball_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best_cnt, best_circularity = None, 0
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < area_min or area > area_max:
-                continue
-            perimeter = cv2.arcLength(cnt, True)
-            if perimeter == 0:
-                continue
-            circularity = 4 * np.pi * area / (perimeter ** 2)
-            if circularity >= hsv_kwargs["min_circularity"] and circularity > best_circularity:
-                best_circularity = circularity
-                best_cnt = cnt
-
-        # update trail: require consecutive detections before recording
-        if best_cnt is not None:
-            (cx, cy), radius = cv2.minEnclosingCircle(best_cnt)
-            center = (int(cx), int(cy))
-            consecutive_detections += 1
-            if consecutive_detections >= MIN_CONSECUTIVE:
-                if trail and np.hypot(cx - trail[-1][0], cy - trail[-1][1]) > MAX_TRAIL_JUMP:
-                    trail.clear()
-                trail.append(center)
-            cv2.circle(result_frame, center, int(radius), (0, 0, 255), 2)
-        else:
-            consecutive_detections = 0
+        # update trail
+        if best_box is not None:
+            x1, y1, x2, y2 = map(int, best_box.xyxy[0])
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            center = (cx, cy)
+            if trail and np.hypot(cx - trail[-1][0], cy - trail[-1][1]) > MAX_TRAIL_JUMP:
+                trail.clear()
+            trail.append(center)
+            cv2.rectangle(result_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(result_frame, f"{best_conf:.2f}", (x1, y1 - 6),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         for j in range(1, len(trail)):
             cv2.line(result_frame, trail[j-1], trail[j], (255, 0, 0), 3)
         for pt in trail:
-            cv2.circle(result_frame, pt, 3, (0, 255, 255), -1)  # yellow dot at each trail point
+            cv2.circle(result_frame, pt, 3, (0, 255, 255), -1)
 
         result_frames.append(cv2.cvtColor(result_frame, cv2.COLOR_BGR2RGB))
 
