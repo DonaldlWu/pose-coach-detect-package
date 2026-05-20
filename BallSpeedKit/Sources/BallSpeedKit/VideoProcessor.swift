@@ -65,6 +65,7 @@ final class VideoProcessor {
         writer.startSession(atSourceTime: .zero)
 
         // --- Frame-by-frame processing ---
+        let detectionOrientation = cgOrientation(from: transform)
         var trail: [CGPoint] = []
         var frameIndex = 0
         let frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFPS))
@@ -75,8 +76,8 @@ final class VideoProcessor {
             guard let sampleBuffer = readerOutput.copyNextSampleBuffer(),
                   let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { break }
 
-            // Run ball detection
-            let detection = try? detector.detect(in: pixelBuffer)
+            // Run ball detection (pass orientation so Vision upright-corrects the frame)
+            let detection = try? detector.detect(in: pixelBuffer, orientation: detectionOrientation)
 
             if let det = detection {
                 // CGContext uses bottom-left origin; YOLO uses top-left → flip y
@@ -193,6 +194,17 @@ final class VideoProcessor {
         )
         outCtx?.draw(cgImage, in: CGRect(origin: .zero, size: size))
         return out
+    }
+}
+
+/// Convert a video track's preferredTransform to a CGImagePropertyOrientation
+/// so that VNImageRequestHandler can upright-correct the raw pixel buffer.
+private func cgOrientation(from transform: CGAffineTransform) -> CGImagePropertyOrientation {
+    switch (transform.a, transform.b, transform.c, transform.d) {
+    case (0,  1, -1, 0): return .right   // 90° CW  (portrait, natural=landscape)
+    case (0, -1,  1, 0): return .left    // 90° CCW
+    case (-1, 0,  0, -1): return .down   // 180°
+    default:             return .up      // identity / already upright
     }
 }
 

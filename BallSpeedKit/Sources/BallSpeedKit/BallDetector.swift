@@ -23,12 +23,17 @@ final class BallDetector {
     }
 
     /// Returns the highest-confidence sports ball detection in the frame, if any.
-    func detect(in pixelBuffer: CVPixelBuffer) throws -> Detection? {
+    /// - Parameter orientation: CGImagePropertyOrientation of the pixel buffer (derived from the video track's preferredTransform).
+    func detect(in pixelBuffer: CVPixelBuffer,
+                orientation: CGImagePropertyOrientation = .up) throws -> Detection? {
         let vnModel = try VNCoreMLModel(for: mlModel)
         let request = VNCoreMLRequest(model: vnModel)
-        request.imageCropAndScaleOption = .scaleFill
+        // scaleFit preserves aspect ratio with letterboxing, matching YOLO training pre-processing.
+        request.imageCropAndScaleOption = .scaleFit
 
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
+                                            orientation: orientation,
+                                            options: [:])
         try handler.perform([request])
 
         // Path A: Vision parsed the model output as object detections
