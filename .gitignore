@@ -1,0 +1,8 @@
+# output files
+output/
+
+# claude settings
+.claude/
+
+# OS
+.DS_Store
