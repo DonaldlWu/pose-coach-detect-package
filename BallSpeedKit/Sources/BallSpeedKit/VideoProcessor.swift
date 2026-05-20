@@ -21,8 +21,8 @@ final class VideoProcessor {
         }
 
         let naturalSize = try await videoTrack.load(.naturalSize)
-        let transform = try await videoTrack.load(.preferredTransform)
-        let nominalFPS = try await videoTrack.load(.nominalFrameRate)
+        let transform   = try await videoTrack.load(.preferredTransform)
+        let nominalFPS  = try await videoTrack.load(.nominalFrameRate)
 
         let reader = try AVAssetReader(asset: asset)
         let readerOutput = AVAssetReaderTrackOutput(
@@ -38,11 +38,15 @@ final class VideoProcessor {
         try? FileManager.default.removeItem(at: outputURL)
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
 
-        let outputSize = naturalSize.applying(transform).standardized
+        // Write at naturalSize; transform is applied as display metadata only.
+        // Frames from AVAssetReader are always in naturalSize dimensions.
+        let frameWidth  = abs(naturalSize.width)
+        let frameHeight = abs(naturalSize.height)
+
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: abs(outputSize.width),
-            AVVideoHeightKey: abs(outputSize.height),
+            AVVideoWidthKey: frameWidth,
+            AVVideoHeightKey: frameHeight,
         ]
         let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         writerInput.expectsMediaDataInRealTime = false
@@ -52,8 +56,8 @@ final class VideoProcessor {
             assetWriterInput: writerInput,
             sourcePixelBufferAttributes: [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: abs(outputSize.width),
-                kCVPixelBufferHeightKey as String: abs(outputSize.height),
+                kCVPixelBufferWidthKey as String: frameWidth,
+                kCVPixelBufferHeightKey as String: frameHeight,
             ]
         )
         writer.add(writerInput)
@@ -64,8 +68,8 @@ final class VideoProcessor {
         var trail: [CGPoint] = []
         var frameIndex = 0
         let frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFPS))
-        let width = abs(outputSize.width)
-        let height = abs(outputSize.height)
+        let width  = frameWidth
+        let height = frameHeight
 
         while reader.status == .reading {
             guard let sampleBuffer = readerOutput.copyNextSampleBuffer(),
