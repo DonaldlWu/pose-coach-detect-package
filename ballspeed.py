@@ -22,7 +22,6 @@ if not os.path.exists(fname):
 stem = os.path.splitext(input_name)[0]
 ext  = os.path.splitext(input_name)[1]
 output_fname = os.path.join(OUTPUT_DIR, f"{stem}_output{ext}")
-trail_path   = os.path.join(OUTPUT_DIR, f"{stem}_trail.jpg")
 
 # set param
 filter_kwargs = {
@@ -42,10 +41,11 @@ hsv_kwargs = {
     "person_area_min": 5000,       # blobs larger than this (px²) are treated as person
 }
 
-# max pixel distance allowed between consecutive trail points (filters impossible jumps)
+# if a new detection jumps further than this, reset the trail
 MAX_TRAIL_JUMP = 300
-# max consecutive frames to rely on Kalman prediction without a real detection
-MAX_PREDICT_FRAMES = 8
+# require this many consecutive detections before recording trail
+MIN_CONSECUTIVE = 3
+
 
 # =========================================================================
 
@@ -66,20 +66,11 @@ def track_baseball(video_path):
         varThreshold=filter_kwargs['background_threshold'],
         detectShadows=False)
 
-    # initialize Kalman filter (state: x, y, vx, vy  |  measurement: x, y) ----
-    kalman = cv2.KalmanFilter(4, 2)
-    kalman.measurementMatrix = np.array([[1,0,0,0],[0,1,0,0]], np.float32)
-    kalman.transitionMatrix  = np.array([[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]], np.float32)
-    kalman.processNoiseCov      = np.eye(4, dtype=np.float32) * 1e-2
-    kalman.measurementNoiseCov  = np.eye(2, dtype=np.float32) * 1e-1
-    kalman.errorCovPost         = np.eye(4, dtype=np.float32)
-    kalman_initialized = False
-    predict_count = 0
-
     # obtain video frames ----------------------------------------------
     trail = []
     frames = []
     result_frames = []
+    consecutive_detections = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -124,11 +115,6 @@ def track_baseball(video_path):
         # intersect cleaned fg mask with white color mask
         ball_mask = cv2.bitwise_and(fg_clean, white_mask)
 
-        # Kalman predict (every frame once initialized)
-        predicted = None
-        if kalman_initialized:
-            predicted = kalman.predict()
-
         # find ball candidate: filter by size and circularity
         area_min = np.pi * hsv_kwargs["min_radius"] ** 2 * 0.5
         area_max = np.pi * hsv_kwargs["max_radius"] ** 2 * 3.0
@@ -146,26 +132,18 @@ def track_baseball(video_path):
                 best_circularity = circularity
                 best_cnt = cnt
 
-        # update Kalman and trail
+        # update trail: require consecutive detections before recording
         if best_cnt is not None:
             (cx, cy), radius = cv2.minEnclosingCircle(best_cnt)
             center = (int(cx), int(cy))
-            if not kalman_initialized:
-                kalman.statePre  = np.array([[cx], [cy], [0.0], [0.0]], np.float32)
-                kalman.statePost = np.array([[cx], [cy], [0.0], [0.0]], np.float32)
-                kalman_initialized = True
-            kalman.correct(np.array([[cx], [cy]], np.float32))
-            predict_count = 0
-            if not trail or np.hypot(cx - trail[-1][0], cy - trail[-1][1]) < MAX_TRAIL_JUMP:
+            consecutive_detections += 1
+            if consecutive_detections >= MIN_CONSECUTIVE:
+                if trail and np.hypot(cx - trail[-1][0], cy - trail[-1][1]) > MAX_TRAIL_JUMP:
+                    trail.clear()
                 trail.append(center)
-            cv2.circle(result_frame, center, int(radius), (0, 0, 255), 2)   # red = detected
-        elif kalman_initialized and predict_count < MAX_PREDICT_FRAMES:
-            px, py = int(predicted[0]), int(predicted[1])
-            predict_count += 1
-            pred_center = (px, py)
-            if not trail or np.hypot(px - trail[-1][0], py - trail[-1][1]) < MAX_TRAIL_JUMP:
-                trail.append(pred_center)
-            cv2.circle(result_frame, pred_center, hsv_kwargs["min_radius"], (0, 165, 255), 2)  # orange = predicted
+            cv2.circle(result_frame, center, int(radius), (0, 0, 255), 2)
+        else:
+            consecutive_detections = 0
 
         for j in range(1, len(trail)):
             cv2.line(result_frame, trail[j-1], trail[j], (255, 0, 0), 3)
@@ -174,20 +152,10 @@ def track_baseball(video_path):
 
         result_frames.append(cv2.cvtColor(result_frame, cv2.COLOR_BGR2RGB))
 
-    return result_frames, frames, trail, width, height, fps
+    return result_frames, trail, width, height, fps
 
 
-result_frames, raw_frames, trail, width, height, fps = track_baseball(fname)
-
-# draw complete trajectory on the first raw frame and save as static image
-if trail and raw_frames:
-    summary = raw_frames[0].copy()
-    for j in range(1, len(trail)):
-        cv2.line(summary, trail[j-1], trail[j], (255, 0, 0), 3)
-    for pt in trail:
-        cv2.circle(summary, pt, 3, (0, 255, 255), -1)
-    cv2.imwrite(trail_path, summary)
-    print(f"Trail image saved to {os.path.abspath(trail_path)}")
+result_frames, trail, width, height, fps = track_baseball(fname)
 
 
 def save_video(frames, fps, output_path="output.mp4"):
