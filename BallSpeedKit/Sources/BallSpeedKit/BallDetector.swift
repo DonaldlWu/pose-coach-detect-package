@@ -78,28 +78,35 @@ final class BallDetector {
 
         for feat in features {
             guard let arr = feat.featureValue.multiArrayValue else { continue }
-            let shape = arr.shape.map { $0.intValue }
-            if shape.count == 3 && shape[2] == 4  { coordArray = arr }
-            if shape.count == 3 && shape[2] == 80 { confArray  = arr }
+            switch feat.featureName {
+            case "coordinates": coordArray = arr
+            case "confidence":  confArray  = arr
+            default:
+                // Fallback: match by last-dimension size
+                let shape = arr.shape.map { $0.intValue }
+                if shape.last == 4  { coordArray = arr }
+                if shape.last == 80 { confArray  = arr }
+            }
         }
 
         guard let coords = coordArray, let confs = confArray else { return nil }
 
-        let n = coords.shape[1].intValue
+        // Model outputs are 2-D: [N, 4] and [N, 80]
+        let n = confs.shape[0].intValue
         var bestConf: Float = confidenceThreshold
         var bestIdx = -1
 
         for i in 0..<n {
-            let conf = confs[[0, i, sportsBallClassIndex] as [NSNumber]].floatValue
+            let conf = confs[[i, sportsBallClassIndex] as [NSNumber]].floatValue
             if conf > bestConf { bestConf = conf; bestIdx = i }
         }
 
         guard bestIdx >= 0 else { return nil }
 
-        let cx = coords[[0, bestIdx, 0] as [NSNumber]].floatValue
-        let cy = coords[[0, bestIdx, 1] as [NSNumber]].floatValue
-        let w  = coords[[0, bestIdx, 2] as [NSNumber]].floatValue
-        let h  = coords[[0, bestIdx, 3] as [NSNumber]].floatValue
+        let cx = coords[[bestIdx, 0] as [NSNumber]].floatValue
+        let cy = coords[[bestIdx, 1] as [NSNumber]].floatValue
+        let w  = coords[[bestIdx, 2] as [NSNumber]].floatValue
+        let h  = coords[[bestIdx, 3] as [NSNumber]].floatValue
 
         let box = CGRect(x: CGFloat(cx - w / 2), y: CGFloat(cy - h / 2),
                          width: CGFloat(w), height: CGFloat(h))
