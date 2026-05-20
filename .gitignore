@@ -4,5 +4,8 @@ output/
 # claude settings
 .claude/
 
+# model weights (source)
+*.pt
+
 # OS
 .DS_Store
