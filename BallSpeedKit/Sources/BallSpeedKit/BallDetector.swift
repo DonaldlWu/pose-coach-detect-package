@@ -12,10 +12,14 @@ final class BallDetector {
     private let mlModel: MLModel
 
     init() throws {
-        guard let modelURL = Bundle.module.url(forResource: "yolov8n", withExtension: "mlpackage") else {
+        // SPM .process() compiles .mlpackage → .mlmodelc at build time;
+        // fall back to .mlpackage for local/preview builds.
+        let modelURL = Bundle.module.url(forResource: "yolov8n", withExtension: "mlmodelc")
+            ?? Bundle.module.url(forResource: "yolov8n", withExtension: "mlpackage")
+        guard let url = modelURL else {
             throw BallSpeedKitError.modelNotFound
         }
-        mlModel = try MLModel(contentsOf: modelURL)
+        mlModel = try MLModel(contentsOf: url)
     }
 
     /// Returns the highest-confidence sports ball detection in the frame, if any.
