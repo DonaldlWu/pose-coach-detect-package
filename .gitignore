@@ -1,11 +1,18 @@
 # output files
 output/
 
+# input test videos
+input/
+
 # claude settings
 .claude/
 
 # model weights (source)
 *.pt
+
+# Swift build artifacts
+BallSpeedKit/.build/
+BallSpeedKit/.swiftpm/
 
 # OS
 .DS_Store
