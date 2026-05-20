@@ -79,7 +79,8 @@ final class VideoProcessor {
             let detection = try? detector.detect(in: pixelBuffer)
 
             if let det = detection {
-                let pixelPt = CGPoint(x: det.center.x * width, y: det.center.y * height)
+                // CGContext uses bottom-left origin; YOLO uses top-left → flip y
+                let pixelPt = CGPoint(x: det.center.x * width, y: (1.0 - det.center.y) * height)
                 if let last = trail.last,
                    hypot(pixelPt.x - last.x, pixelPt.y - last.y) > maxTrailJump * width {
                     trail.removeAll()
@@ -161,9 +162,10 @@ final class VideoProcessor {
 
         // Draw detection bounding box
         if let det = detection {
+            // Flip y: YOLO top-left origin → CGContext bottom-left origin
             let box = CGRect(
                 x: det.boundingBox.minX * size.width,
-                y: det.boundingBox.minY * size.height,
+                y: (1.0 - det.boundingBox.maxY) * size.height,
                 width: det.boundingBox.width * size.width,
                 height: det.boundingBox.height * size.height
             )
