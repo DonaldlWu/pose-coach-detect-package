@@ -144,6 +144,54 @@ To use a larger or custom-trained model:
    Bundle.module.url(forResource: "yolov8m", withExtension: "mlpackage")
    ```
 
+## Python Prototype Tool
+
+`Tools/ballspeed.py` is a local prototype script for quick YOLO validation outside the Swift package. It is not part of the SwiftPM product.
+
+### Setup
+
+Install the Python dependencies in your local environment:
+
+```bash
+pip install ultralytics opencv-python numpy tqdm
+```
+
+Place the source YOLO weight file at the repo root:
+
+```text
+yolov8n.pt
+```
+
+Place input videos under:
+
+```text
+input/
+```
+
+`input/`, `output/`, and `*.pt` are intentionally ignored by git.
+
+### Usage
+
+From the repo root:
+
+```bash
+python3 Tools/ballspeed.py hitting_video.mp4
+```
+
+The script reads:
+
+```text
+input/hitting_video.mp4
+```
+
+and writes:
+
+```text
+output/hitting_video_output.mp4
+```
+
+The script resolves paths relative to the repository root, so it can also be launched from another working directory.
+
 ## Known Limitations
 
 - Output is written through `AVAssetWriter` as MP4 and may not preserve Photos slow-motion time mapping or edited playback metadata.
