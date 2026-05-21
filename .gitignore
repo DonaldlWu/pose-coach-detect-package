@@ -4,15 +4,19 @@ output/
 # input test videos
 input/
 
+# local SwiftPM state
+.build/
+.swiftpm/
+
 # claude settings
 .claude/
 
 # model weights (source)
 *.pt
 
-# Swift build artifacts
-BallSpeedKit/.build/
-BallSpeedKit/.swiftpm/
+# Python local artifacts
+__pycache__/
+*.py[cod]
 
 # OS
 .DS_Store
