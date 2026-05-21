@@ -15,8 +15,13 @@ let package = Package(
             name: "BallSpeedKit",
             path: "Sources/BallSpeedKit",
             resources: [
-                .process("Resources"),
+                .copy("Resources/yolov8n.mlpackage"),
+                .copy("Resources/yolov8s-pose.mlpackage"),
             ]
+        ),
+        .testTarget(
+            name: "BallSpeedKitTests",
+            dependencies: ["BallSpeedKit"]
         ),
     ]
 )

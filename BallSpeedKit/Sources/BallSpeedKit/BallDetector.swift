@@ -1,6 +1,7 @@
-import CoreML
 import Vision
+import CoreML
 import CoreGraphics
+import Foundation
 
 struct Detection {
     let center: CGPoint
@@ -8,18 +9,25 @@ struct Detection {
     let confidence: Float
 }
 
+enum BallDetectionFilter {
+    static let sportsBallClassIndex = 32
+    static let confidenceThreshold: Float = 0.45
+
+    static func isSportsBallLabel(_ label: String) -> Bool {
+        let normalized = label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "sports ball" || normalized == "ball"
+    }
+
+    static func acceptsSportsBall(label: String, confidence: Float) -> Bool {
+        isSportsBallLabel(label) && confidence >= confidenceThreshold
+    }
+}
+
 final class BallDetector {
     private let mlModel: MLModel
 
     init() throws {
-        // SPM .process() compiles .mlpackage → .mlmodelc at build time;
-        // fall back to .mlpackage for local/preview builds.
-        let modelURL = Bundle.module.url(forResource: "yolov8n", withExtension: "mlmodelc")
-            ?? Bundle.module.url(forResource: "yolov8n", withExtension: "mlpackage")
-        guard let url = modelURL else {
-            throw BallSpeedKitError.modelNotFound
-        }
-        mlModel = try MLModel(contentsOf: url)
+        mlModel = try BallSpeedModelProvider.coreMLModel(for: .objectDetection)
     }
 
     /// Returns the highest-confidence sports ball detection in the frame, if any.
@@ -53,7 +61,10 @@ final class BallDetector {
     private func bestBall(from observations: [VNRecognizedObjectObservation]) -> Detection? {
         let candidates = observations.compactMap { obs -> (VNRecognizedObjectObservation, Float)? in
             guard let top = obs.labels.first,
-                  top.identifier.lowercased().contains("ball") else { return nil }
+                  BallDetectionFilter.acceptsSportsBall(
+                    label: top.identifier,
+                    confidence: top.confidence
+                  ) else { return nil }
             return (obs, top.confidence)
         }
         guard let (obs, conf) = candidates.max(by: { $0.1 < $1.1 }) else { return nil }
@@ -72,8 +83,8 @@ final class BallDetector {
     //   confidence  – shape [1, N, 80] (per-class score, COCO 80 classes)
     // Sports ball is COCO class index 32.
 
-    private let sportsBallClassIndex = 32
-    private let confidenceThreshold: Float = 0.25
+    private let sportsBallClassIndex = BallDetectionFilter.sportsBallClassIndex
+    private let confidenceThreshold = BallDetectionFilter.confidenceThreshold
 
     private func bestBall(fromFeatures features: [VNCoreMLFeatureValueObservation]) -> Detection? {
         var coordArray: MLMultiArray?
