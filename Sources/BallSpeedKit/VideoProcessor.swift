@@ -11,7 +11,11 @@ final class VideoProcessor {
         self.detector = detector
     }
 
-    func process(inputURL: URL, outputURL: URL) async throws {
+    func process(
+        inputURL: URL,
+        outputURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws {
         // --- Reader setup ---
         let asset = AVURLAsset(url: inputURL)
         let duration = try await asset.load(.duration)
@@ -71,8 +75,10 @@ final class VideoProcessor {
         var trail: [CGPoint] = []
         var frameIndex = 0
         let frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFPS))
+        let totalFrames = VideoProcessingProgress.estimatedTotalFrames(duration: duration, frameRate: nominalFPS)
         let width  = frameWidth
         let height = frameHeight
+        onProgress?(0)
 
         while reader.status == .reading {
             guard let sampleBuffer = readerOutput.copyNextSampleBuffer(),
@@ -104,6 +110,12 @@ final class VideoProcessor {
                 adaptor.append(buf, withPresentationTime: presentationTime)
             }
             frameIndex += 1
+            if let progress = VideoProcessingProgress.value(
+                completedFrames: frameIndex,
+                totalFrames: totalFrames
+            ) {
+                onProgress?(progress)
+            }
         }
 
         writerInput.markAsFinished()
@@ -112,6 +124,7 @@ final class VideoProcessor {
         if writer.status == .failed {
             throw writer.error ?? BallSpeedKitError.writeFailed
         }
+        onProgress?(1)
     }
 
     // MARK: - Drawing
@@ -195,6 +208,20 @@ final class VideoProcessor {
         )
         outCtx?.draw(cgImage, in: CGRect(origin: .zero, size: size))
         return out
+    }
+}
+
+enum VideoProcessingProgress {
+    static func estimatedTotalFrames(duration: CMTime, frameRate: Float) -> Int {
+        guard duration.seconds.isFinite, duration.seconds > 0, frameRate > 0 else {
+            return 0
+        }
+        return max(Int((duration.seconds * Double(frameRate)).rounded()), 1)
+    }
+
+    static func value(completedFrames: Int, totalFrames: Int) -> Double? {
+        guard totalFrames > 0 else { return nil }
+        return min(max(Double(completedFrames) / Double(totalFrames), 0), 1)
     }
 }
 

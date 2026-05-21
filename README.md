@@ -62,7 +62,11 @@ The main entry point. Stateless; safe to create multiple instances.
 ```swift
 public struct BallSpeedKit {
     public init()
-    public func process(inputURL: URL, outputURL: URL) async throws
+    public func process(
+        inputURL: URL,
+        outputURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws
 }
 ```
 
@@ -74,6 +78,7 @@ Reads the input video frame by frame, detects a sports ball using the bundled YO
 |------------|-------|---------------------------------------------|
 | `inputURL` | `URL` | Source video file (MOV, MP4, or any format supported by AVFoundation) |
 | `outputURL`| `URL` | Destination path for the annotated MP4. Existing file is overwritten. |
+| `onProgress` | `((Double) -> Void)?` | Optional callback reporting processing progress from `0.0` to `1.0` |
 
 - **Throws**: `BallSpeedKitError`
 - **Concurrency**: `async`, must be called from an async context.

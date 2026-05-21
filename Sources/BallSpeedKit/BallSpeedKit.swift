@@ -22,9 +22,14 @@ public struct BallSpeedKit {
     /// - Parameters:
     ///   - inputURL:  URL of the source video file.
     ///   - outputURL: URL where the annotated video will be written (MP4).
-    public func process(inputURL: URL, outputURL: URL) async throws {
+    ///   - onProgress: Optional callback reporting processing progress from 0.0 to 1.0.
+    public func process(
+        inputURL: URL,
+        outputURL: URL,
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws {
         let detector = try BallDetector()
         let processor = VideoProcessor(detector: detector)
-        try await processor.process(inputURL: inputURL, outputURL: outputURL)
+        try await processor.process(inputURL: inputURL, outputURL: outputURL, onProgress: onProgress)
     }
 }
